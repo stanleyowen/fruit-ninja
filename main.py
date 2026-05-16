@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 
-import cv2
-import numpy as np
 import pygame
 
 from game.camera_picker import detect_cameras, run_camera_picker
@@ -29,10 +28,28 @@ def build_tracker(kind: str, cam_index: int = 0) -> HandTracker:
     raise ValueError(f"unknown tracker: {kind}")
 
 
-def cv2_frame_to_surface(frame_bgr: np.ndarray, target_w: int, target_h: int) -> pygame.Surface:
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    rgb = cv2.resize(rgb, (target_w, target_h))
-    return pygame.image.frombuffer(rgb.tobytes(), (target_w, target_h), "RGB")
+def build_background(w: int, h: int) -> pygame.Surface:
+    """Render a static gradient background with decorative stars once at startup."""
+    surf = pygame.Surface((w, h))
+    top    = (10,  8, 30)
+    bottom = (25, 18, 55)
+    for y in range(h):
+        t = y / h
+        r = int(top[0] + (bottom[0] - top[0]) * t)
+        g = int(top[1] + (bottom[1] - top[1]) * t)
+        b = int(top[2] + (bottom[2] - top[2]) * t)
+        pygame.draw.line(surf, (r, g, b), (0, y), (w, y))
+
+    # Scattered star-like dots for depth.
+    import random
+    rng = random.Random(42)
+    for _ in range(120):
+        sx = rng.randint(0, w)
+        sy = rng.randint(0, h)
+        br = rng.randint(120, 220)
+        r  = rng.randint(0, 1)
+        pygame.draw.circle(surf, (br, br, br + 30 if r else br), (sx, sy), r)
+    return surf
 
 
 def draw_trail(surf: pygame.Surface, trail_points: list, color=(255, 255, 255)) -> None:
@@ -76,15 +93,19 @@ def main() -> int:
     tracker = build_tracker(args.tracker, cam_index=cam_index)
     tracker.start()
 
+    bg_surf = build_background(SCREEN_W, SCREEN_H)
+    warn_font = pygame.font.SysFont("arial", 26, bold=True)
+
     spawner = FruitSpawner(SCREEN_W, SCREEN_H)
     fruits: list[Fruit] = []
     trails = TrailStore()
 
     score = 0
     lives = args.lives
-    game_over = False
-    flash_until = 0.0  # red flash on bomb / miss
-    last_t = time.monotonic()
+    game_over    = False
+    flash_until  = 0.0
+    last_hand_t  = time.monotonic()   # last time any hand was visible
+    last_t       = time.monotonic()
 
     try:
         while True:
@@ -106,6 +127,8 @@ def main() -> int:
 
             samples = tracker.poll()
             trails.update(samples)
+            if samples:
+                last_hand_t = now
 
             if not game_over:
                 spawner.update(dt, fruits)
@@ -153,14 +176,7 @@ def main() -> int:
                 fruits = kept
 
             # --- Render ---
-            bg = tracker.background_frame()
-            if bg is not None:
-                surf = cv2_frame_to_surface(bg, SCREEN_W, SCREEN_H)
-                surf.set_alpha(110)
-                screen.fill((0, 0, 0))
-                screen.blit(surf, (0, 0))
-            else:
-                screen.fill((15, 15, 25))
+            screen.blit(bg_surf, (0, 0))
 
             for f in fruits:
                 f.draw(screen)
@@ -172,6 +188,25 @@ def main() -> int:
                 draw_trail(screen, pts, color)
                 if pts:
                     pygame.draw.circle(screen, color, (int(pts[-1].x), int(pts[-1].y)), 12, 2)
+
+            # "No hand detected" warning — shown after 1 s without any hand.
+            hand_absent = now - last_hand_t
+            if hand_absent > 1.0 and not game_over:
+                # Pulse opacity: full bright for 0.5 s delay then sine-wave.
+                pulse = abs(math.sin((hand_absent - 1.0) * math.pi * 1.4))
+                alpha = int(60 + 195 * pulse)
+                warn_txt = warn_font.render(
+                    "No hand detected — raise your hand in front of the camera",
+                    True, (255, 220, 80),
+                )
+                warn_txt.set_alpha(alpha)
+                wx = SCREEN_W // 2 - warn_txt.get_width() // 2
+                wy = SCREEN_H - 64
+                # Subtle dark pill behind the text.
+                pill = pygame.Surface((warn_txt.get_width() + 24, warn_txt.get_height() + 10), pygame.SRCALPHA)
+                pill.fill((0, 0, 0, int(alpha * 0.55)))
+                screen.blit(pill, (wx - 12, wy - 5))
+                screen.blit(warn_txt, (wx, wy))
 
             # HUD
             screen.blit(font.render(f"Score: {score}", True, (255, 255, 255)), (20, 16))
