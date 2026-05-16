@@ -9,7 +9,7 @@ import pygame
 
 from game.fruit import (
     FRUIT_PALETTE, GRAVITY, Fruit,
-    _draw_watermelon_whole, _draw_orange_whole, _draw_apple_whole,
+    _draw_watermelon_whole, _draw_orange_whole, _draw_apple_whole, _draw_kiwi_whole,
 )
 
 
@@ -27,6 +27,8 @@ class Difficulty:
     slice_speed: float
     color:       tuple  # accent (R,G,B)
     fruit_name:  str    # which fruit sprite to show on the card
+    multiplayer: bool  = False
+    time_limit:  float = 0.0   # seconds; 0 means lives-based
 
 
 DIFFICULTIES: list[Difficulty] = [
@@ -50,6 +52,14 @@ DIFFICULTIES: list[Difficulty] = [
         desc=["Fast fruits, many bombs", "Only 2 lives — good luck"],
         lives=2, spawn_every=0.55, bomb_chance=0.15, slice_speed=1100,
         color=(220, 52, 48), fruit_name="apple",
+    ),
+    Difficulty(
+        key="2v2",    label="2  vs  2",
+        tagline="Team Battle",
+        desc=["2 teams of 2 players", "90-second timed match"],
+        lives=0, spawn_every=0.75, bomb_chance=0.06, slice_speed=850,
+        color=(155, 80, 230), fruit_name="kiwi",
+        multiplayer=True, time_limit=90.0,
     ),
 ]
 
@@ -120,6 +130,7 @@ _ICON_DRAWERS = {
     "watermelon": _draw_watermelon_whole,
     "orange":     _draw_orange_whole,
     "apple":      _draw_apple_whole,
+    "kiwi":       _draw_kiwi_whole,
 }
 
 def _make_fruit_icon(name: str, size: int) -> pygame.Surface:
@@ -160,12 +171,6 @@ def _spawn_demo(w, h, rng):
     return f
 
 
-# ── Card geometry ─────────────────────────────────────────────────────────
-
-_CW, _CH = 330, 310
-_GAP      = 38
-
-
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Difficulty:
@@ -173,6 +178,12 @@ def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Diffi
     SW, SH = screen.get_size()
     rng    = random.Random()
     clock  = pygame.time.Clock()
+
+    # Card geometry: scale to fit all difficulty options across the screen.
+    n    = len(DIFFICULTIES)
+    _CH  = 310
+    _GAP = 28 if n > 3 else 38
+    _CW  = (SW - 80 - (n - 1) * _GAP) // n
 
     try:
         f_title  = pygame.font.SysFont("arial", 78, bold=True)
@@ -227,9 +238,9 @@ def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Diffi
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit(); raise SystemExit
-                if event.key == pygame.K_1: return DIFFICULTIES[0]
-                if event.key == pygame.K_2: return DIFFICULTIES[1]
-                if event.key == pygame.K_3: return DIFFICULTIES[2]
+                for ki, kval in enumerate([pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4]):
+                    if event.key == kval and ki < len(DIFFICULTIES):
+                        return DIFFICULTIES[ki]
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if hovered >= 0:
                     return DIFFICULTIES[hovered]
@@ -332,13 +343,20 @@ def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Diffi
                              (24, 198), (_CW-24, 198), 1)
 
             # -- Stats (icon + text, stacked vertically) --
-            stats = [
-                (_icon_heart, diff.color,         f"Lives:  {diff.lives}"),
-                (_icon_bolt,  (120, 200, 255),
-                 f"Speed:  {'Normal' if diff.spawn_every > 1.0 else 'Fast' if diff.spawn_every > 0.65 else 'Blazing'}"),
-                (_icon_bomb,  (240, 155, 40),
-                 f"Bombs: {'Few' if diff.bomb_chance < 0.07 else 'Some' if diff.bomb_chance < 0.12 else 'Many'}"),
-            ]
+            if diff.multiplayer:
+                stats = [
+                    (_icon_heart, (200, 90, 240),  "Players: 4 (2 per team)"),
+                    (_icon_bolt,  (120, 200, 255), f"Time: {int(diff.time_limit)} seconds"),
+                    (_icon_bomb,  (80,  210, 140),  "Most slices wins"),
+                ]
+            else:
+                stats = [
+                    (_icon_heart, diff.color,         f"Lives:  {diff.lives}"),
+                    (_icon_bolt,  (120, 200, 255),
+                     f"Speed:  {'Normal' if diff.spawn_every > 1.0 else 'Fast' if diff.spawn_every > 0.65 else 'Blazing'}"),
+                    (_icon_bomb,  (240, 155, 40),
+                     f"Bombs: {'Few' if diff.bomb_chance < 0.07 else 'Some' if diff.bomb_chance < 0.12 else 'Many'}"),
+                ]
             for si, (icon_fn, icol, stxt) in enumerate(stats):
                 sy = 206 + si * 22
                 tmp = pygame.Surface((18, 18), pygame.SRCALPHA)
@@ -355,7 +373,8 @@ def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Diffi
             screen.blit(card, rect.topleft)
 
         # ── Bottom hint ───────────────────────────────────────────────────
-        hint = _surf(f_hint, "Click a card  or  press  1 / 2 / 3  to begin",
+        keys = " / ".join(str(i + 1) for i in range(len(DIFFICULTIES)))
+        hint = _surf(f_hint, f"Click a card  or  press  {keys}  to begin",
                      (175, 170, 195))
         screen.blit(hint, hint.get_rect(centerx=SW//2, bottom=SH-20))
 
