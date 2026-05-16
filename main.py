@@ -32,70 +32,95 @@ def build_tracker(kind: str, cam_index: int = 0) -> HandTracker:
 
 # ── Background ────────────────────────────────────────────────────────────
 
+def _lerp_color(c0: tuple, c1: tuple, t: float) -> tuple:
+    return tuple(int(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
+
+
 def build_background(w: int, h: int) -> pygame.Surface:
-    """Bamboo-dojo background: vertical stalks over a dark gradient sky."""
-    rng  = random.Random(7)
+    """Japanese-dusk scene: warm sunset sky, layered mountains, bamboo silhouettes."""
+    rng  = random.Random(17)
     surf = pygame.Surface((w, h))
 
-    # Deep navy-indigo gradient sky.
+    # ── Gradient sky (dusk palette) ───────────────────────────────────────
+    stops = [
+        (0.00, (18,   8,  52)),   # deep indigo at top
+        (0.20, (60,  18,  90)),   # purple
+        (0.42, (148, 42,  82)),   # rose-crimson
+        (0.62, (210, 88,  48)),   # warm amber
+        (0.80, (235, 148, 52)),   # orange-gold
+        (1.00, (195, 90,  38)),   # deep amber at horizon / ground
+    ]
     for y in range(h):
         t = y / h
-        r = int(12  + 8  * t)
-        g = int(8   + 6  * t)
-        b = int(38  + 22 * t)
-        pygame.draw.line(surf, (r, g, b), (0, y), (w, y))
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            if t0 <= t <= t1:
+                col = _lerp_color(c0, c1, (t - t0) / (t1 - t0))
+                pygame.draw.line(surf, col, (0, y), (w, y))
+                break
 
-    # Bamboo stalks.
-    x = rng.randint(-30, 0)
-    while x < w + 60:
-        sw = rng.randint(44, 74)
-        base = (
-            rng.randint(130, 168),
-            rng.randint(158, 200),
-            rng.randint(42,  75),
-        )
-        # Cylindrical highlight: brighter at centre, darker at edges.
-        for px in range(x, min(x + sw, w)):
-            t = (px - x) / sw
-            bright = 0.72 + 0.38 * math.exp(-((t - 0.5) ** 2) / 0.07)
-            col = tuple(min(255, int(c * bright)) for c in base)
-            pygame.draw.line(surf, col, (px, 0), (px, h))
+    # ── Moon glow ─────────────────────────────────────────────────────────
+    mx, my = int(w * 0.74), int(h * 0.17)
+    for gr in range(110, 0, -4):
+        a = int(22 * (1 - gr / 110) ** 0.45)
+        gs = pygame.Surface((gr * 2, gr * 2), pygame.SRCALPHA)
+        pygame.draw.circle(gs, (255, 238, 195, a), (gr, gr), gr)
+        surf.blit(gs, (mx - gr, my - gr))
+    pygame.draw.circle(surf, (255, 248, 215), (mx, my), 40)
+    pygame.draw.circle(surf, (248, 238, 200), (mx, my), 37)
 
-        # Edge shadows.
-        for i in range(5):
-            a  = int(190 * (1 - i / 5))
-            sl = pygame.Surface((1, h), pygame.SRCALPHA)
-            sl.fill((0, 0, 0, a))
-            surf.blit(sl, (x + i, 0))
-            if x + sw - 1 - i < w:
-                surf.blit(sl, (x + sw - 1 - i, 0))
+    # ── Stars (faint dots above the mountain line) ────────────────────────
+    for _ in range(80):
+        sx = rng.randint(0, w)
+        sy = rng.randint(0, int(h * 0.52))
+        br = rng.randint(140, 230)
+        pygame.draw.circle(surf, (br, br, br), (sx, sy), rng.randint(0, 1))
 
-        # Bamboo nodes.
-        ny = rng.randint(50, 115)
+    # ── Far mountains (purple-haze silhouette) ────────────────────────────
+    pts = [(0, h)]
+    x = 0
+    while x < w:
+        x += rng.randint(55, 165)
+        pts.append((min(x, w), int(h * rng.uniform(0.52, 0.66))))
+    pts += [(w, h)]
+    pygame.draw.polygon(surf, (52, 22, 78), pts)
+    # Faint rim-light along the mountain ridge.
+    for i in range(1, len(pts) - 1):
+        pygame.draw.line(surf, (88, 42, 110), pts[i - 1], pts[i], 2)
+
+    # ── Near mountains (dark, close) ──────────────────────────────────────
+    pts2 = [(0, h)]
+    x = 0
+    while x < w:
+        x += rng.randint(40, 120)
+        pts2.append((min(x, w), int(h * rng.uniform(0.66, 0.80))))
+    pts2 += [(w, h)]
+    pygame.draw.polygon(surf, (22, 10, 40), pts2)
+    for i in range(1, len(pts2) - 1):
+        pygame.draw.line(surf, (50, 22, 72), pts2[i - 1], pts2[i], 2)
+
+    # ── Bamboo silhouettes (left & right edges) ───────────────────────────
+    for side_x in [rng.randint(30, 90), rng.randint(55, 110),
+                   w - rng.randint(30, 90), w - rng.randint(55, 110)]:
+        sw  = rng.randint(7, 14)
+        col = (14, 8, 26)
+        pygame.draw.rect(surf, col, (side_x, 0, sw, h))
+        ny = rng.randint(40, 100)
         while ny < h:
-            node = tuple(max(0, c - 28) for c in base)
-            pygame.draw.rect(surf, node, (x, ny, sw, 8))
-            hl = tuple(min(255, c + 22) for c in base)
-            pygame.draw.rect(surf, hl, (x + 2, ny + 1, sw - 4, 3))
-            ny += rng.randint(80, 148)
+            pygame.draw.rect(surf, (22, 12, 38), (side_x - 3, ny, sw + 6, 8))
+            ny += rng.randint(80, 145)
 
-        x += sw + rng.randint(2, 6)
-
-    # Light dim (keeps bamboo clearly visible).
-    dim = pygame.Surface((w, h), pygame.SRCALPHA)
-    dim.fill((0, 0, 0, 72))
-    surf.blit(dim, (0, 0))
-
-    # Vignette corners.
+    # ── Vignette ──────────────────────────────────────────────────────────
     vig = pygame.Surface((w, h), pygame.SRCALPHA)
-    for i in range(90):
-        a  = int(200 * ((90 - i) / 90) ** 2.4)
+    for i in range(80):
+        a  = int(190 * ((80 - i) / 80) ** 2.3)
         vs = pygame.Surface((1, h), pygame.SRCALPHA)
         vs.fill((0, 0, 0, a))
         vig.blit(vs, (i, 0))
         vig.blit(vs, (w - 1 - i, 0))
-    for i in range(55):
-        a  = int(160 * ((55 - i) / 55) ** 2.4)
+    for i in range(50):
+        a  = int(150 * ((50 - i) / 50) ** 2.3)
         hs = pygame.Surface((w, 1), pygame.SRCALPHA)
         hs.fill((0, 0, 0, a))
         vig.blit(hs, (0, i))
@@ -218,6 +243,55 @@ def draw_warning(surf: pygame.Surface, font, now: float, last_hand_t: float) -> 
                      border_radius=10)
     surf.blit(pill, (wx - 14, wy - 7))
     surf.blit(txt,  (wx, wy))
+
+
+# ── Bomb fire ────────────────────────────────────────────────────────────
+
+def draw_bomb_fire(surf: pygame.Surface, f: "Fruit", now: float) -> None:
+    """Animated flame tongues drawn above a live bomb."""
+    cx, cy = int(f.x), int(f.y)
+    r      = int(f.radius)
+
+    FW = r * 2 + 8
+    FH = r * 4
+    fs = pygame.Surface((FW, FH), pygame.SRCALPHA)
+    lx = FW // 2
+
+    # 4 flame tongues with staggered phases.
+    for i in range(4):
+        phase  = now * 8.5 + i * (math.tau / 4)
+        lean   = int(math.sin(phase) * r * 0.30)
+        height = int(r * (1.1 + 0.55 * abs(math.sin(phase * 0.72 + 0.4))))
+
+        base_y = FH - 2
+        # Draw 9 circles stacked bottom-to-tip, transitioning dark-red → yellow → white.
+        for s in range(9):
+            t  = s / 8
+            px = lx + lean + int(math.sin(phase + t * 1.4) * r * 0.09)
+            py = base_y - int(height * t)
+            pr = max(1, int(r * 0.26 * (1 - t * 0.70)))
+
+            if t < 0.33:
+                col = (215, int(38  + 145 * (t / 0.33)), 0)
+            elif t < 0.66:
+                tt  = (t - 0.33) / 0.33
+                col = (255, int(183 + 60  * tt), int(18 * tt))
+            else:
+                tt  = (t - 0.66) / 0.34
+                col = (255, int(243 + 12  * tt), int(18 + 210 * tt))
+
+            alpha = int(215 * (1 - t * 0.52))
+            pygame.draw.circle(fs, (*col, alpha), (px, py), pr)
+
+    # Bright core flicker at the very base of each tongue.
+    for i in range(4):
+        phase = now * 12.0 + i * (math.tau / 4)
+        px = lx + int(math.sin(phase) * r * 0.18)
+        py = FH - 4
+        pr = max(2, int(r * 0.14))
+        pygame.draw.circle(fs, (255, 255, 180, 240), (px, py), pr)
+
+    surf.blit(fs, (cx - FW // 2, cy - r - FH + 10))
 
 
 # ── Slash trail ───────────────────────────────────────────────────────────
@@ -367,8 +441,10 @@ def main() -> int:
             screen.blit(bg_surf, (0, 0))       # 1. Bamboo background
             juice_layer.draw(screen)            # 2. Juice stains
 
-            for f in fruits:                    # 3. Fruits
+            for f in fruits:                    # 3. Fruits + bomb fire
                 f.draw(screen)
+                if f.is_bomb and not f.sliced:
+                    draw_bomb_fire(screen, f, now)
 
             for hand_id, trail in trails.trails().items():   # 4. Slash trails
                 pts   = list(trail.points)
