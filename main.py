@@ -157,8 +157,7 @@ def _txt_shadow(font: pygame.font.Font, text: str, color: tuple,
 
 # ── HUD drawing ───────────────────────────────────────────────────────────
 
-def draw_score_badge(surf: pygame.Surface, small_font, big_font,
-                     score: int, x: int, y: int) -> None:
+def draw_score_badge(small_font, big_font, score: int) -> pygame.Surface:
     W, H = 170, 68
     badge = pygame.Surface((W, H), pygame.SRCALPHA)
     pygame.draw.rect(badge, (0, 0, 0, 170), (0, 0, W, H), border_radius=14)
@@ -169,11 +168,10 @@ def draw_score_badge(surf: pygame.Surface, small_font, big_font,
 
     val = _txt(big_font, str(score), (255, 255, 255))
     badge.blit(val, (W // 2 - val.get_width() // 2, 28))
-    surf.blit(badge, (x, y))
+    return badge
 
 
-def draw_lives_badge(surf: pygame.Surface, small_font, heart_font,
-                     lives: int, max_lives: int, x: int, y: int) -> None:
+def draw_lives_badge(small_font, heart_font, lives: int, max_lives: int) -> pygame.Surface:
     heart_w  = heart_font.size("♥")[0]
     W = max(140, max_lives * (heart_w + 6) + 24)
     H = 68
@@ -191,7 +189,7 @@ def draw_lives_badge(surf: pygame.Surface, small_font, heart_font,
         h_surf = _txt(heart_font, "♥", col)
         badge.blit(h_surf, (hx + i * (heart_w + 6), 30))
 
-    surf.blit(badge, (x - W, y))
+    return badge
 
 
 def draw_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
@@ -224,26 +222,29 @@ def draw_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
     surf.blit(hint, hint.get_rect(centerx=SCREEN_W // 2, top=py + 240))
 
 
-def draw_warning(surf: pygame.Surface, font, now: float, last_hand_t: float) -> None:
+def _build_warn_surf(font: pygame.font.Font) -> tuple[pygame.Surface, int, int]:
+    """Pre-render the warning banner into a single composite surface."""
+    msg = "✋  No hand detected — raise your hand in front of the camera"
+    txt = _txt_shadow(font, msg, (255, 220, 80))
+    tw, th = txt.get_size()
+    W, H = tw + 28, th + 14
+    composite = pygame.Surface((W, H), pygame.SRCALPHA)
+    # Fill pill at 60% opacity (153 = round(255 * 0.6)); set_alpha later scales both together.
+    pygame.draw.rect(composite, (0, 0, 0, 153), (0, 0, W, H), border_radius=10)
+    composite.blit(txt, (14, 7))
+    x = SCREEN_W // 2 - W // 2
+    y = SCREEN_H - 58 - 7
+    return composite, x, y
+
+
+def draw_warning(surf: pygame.Surface, warn_surf: pygame.Surface,
+                 wx: int, wy: int, now: float, last_hand_t: float) -> None:
     absent = now - last_hand_t
     if absent <= 1.0:
         return
     pulse = abs(math.sin((absent - 1.0) * math.pi * 1.4))
-    alpha = int(80 + 175 * pulse)
-
-    msg = "✋  No hand detected — raise your hand in front of the camera"
-    txt = _txt_shadow(font, msg, (255, 220, 80))
-    txt.set_alpha(alpha)
-
-    tw, th = txt.get_size()
-    wx = SCREEN_W // 2 - tw // 2
-    wy = SCREEN_H - 58
-
-    pill = pygame.Surface((tw + 28, th + 14), pygame.SRCALPHA)
-    pygame.draw.rect(pill, (0, 0, 0, int(alpha * 0.6)), (0, 0, tw + 28, th + 14),
-                     border_radius=10)
-    surf.blit(pill, (wx - 14, wy - 7))
-    surf.blit(txt,  (wx, wy))
+    warn_surf.set_alpha(int(80 + 175 * pulse))
+    surf.blit(warn_surf, (wx, wy))
 
 
 # ── Bomb fire ────────────────────────────────────────────────────────────
@@ -258,16 +259,16 @@ def draw_bomb_fire(surf: pygame.Surface, f: "Fruit", now: float) -> None:
     fs = pygame.Surface((FW, FH), pygame.SRCALPHA)
     lx = FW // 2
 
-    # 4 flame tongues with staggered phases.
-    for i in range(4):
-        phase  = now * 8.5 + i * (math.tau / 4)
+    # 3 flame tongues with staggered phases.
+    for i in range(3):
+        phase  = now * 8.5 + i * (math.tau / 3)
         lean   = int(math.sin(phase) * r * 0.30)
         height = int(r * (1.1 + 0.55 * abs(math.sin(phase * 0.72 + 0.4))))
 
         base_y = FH - 2
-        # Draw 9 circles stacked bottom-to-tip, transitioning dark-red → yellow → white.
-        for s in range(9):
-            t  = s / 8
+        # Draw 6 circles stacked bottom-to-tip, transitioning dark-red → yellow → white.
+        for s in range(6):
+            t  = s / 5
             px = lx + lean + int(math.sin(phase + t * 1.4) * r * 0.09)
             py = base_y - int(height * t)
             pr = max(1, int(r * 0.26 * (1 - t * 0.70)))
@@ -285,8 +286,8 @@ def draw_bomb_fire(surf: pygame.Surface, f: "Fruit", now: float) -> None:
             pygame.draw.circle(fs, (*col, alpha), (px, py), pr)
 
     # Bright core flicker at the very base of each tongue.
-    for i in range(4):
-        phase = now * 12.0 + i * (math.tau / 4)
+    for i in range(3):
+        phase = now * 12.0 + i * (math.tau / 3)
         px = lx + int(math.sin(phase) * r * 0.18)
         py = FH - 4
         pr = max(2, int(r * 0.14))
@@ -341,6 +342,13 @@ def main() -> int:
     # Background built once; shared by all screens.
     bg_surf = build_background(SCREEN_W, SCREEN_H)
 
+    # Cached single-color overlay — reused every flash frame instead of re-allocated.
+    flash_overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    flash_overlay.fill((255, 50, 50, 100))
+
+    # Warning banner built once; set_alpha() animates it each frame.
+    warn_surf, warn_x, warn_y = _build_warn_surf(f_warn)
+
     # ── Step 1: device / tracker selection ───────────────────────────────
     if args.tracker is not None and args.cam is not None:
         # CLI override: skip the UI entirely.
@@ -371,6 +379,12 @@ def main() -> int:
     flash_until = 0.0
     last_hand_t = time.monotonic()
     last_t      = time.monotonic()
+
+    # HUD badge cache — rebuilt only when the displayed value changes.
+    _score_surf: pygame.Surface | None = None
+    _score_val  = -1
+    _lives_surf: pygame.Surface | None = None
+    _lives_key: tuple[int, int] = (-1, -1)
 
     try:
         while True:
@@ -467,15 +481,20 @@ def main() -> int:
                     pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 6)
 
             if now < flash_until:               # 5. Hit flash
-                overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-                overlay.fill((255, 50, 50, 100))
-                screen.blit(overlay, (0, 0))
+                screen.blit(flash_overlay, (0, 0))
 
-            draw_score_badge(screen, f_small, f_hud, score, 18, 14)
-            draw_lives_badge(screen, f_small, f_heart, lives, MAX_LIVES,
-                             SCREEN_W - 18, 14)
+            if score != _score_val:
+                _score_surf = draw_score_badge(f_small, f_hud, score)
+                _score_val  = score
+            screen.blit(_score_surf, (18, 14))
 
-            draw_warning(screen, f_warn, now, last_hand_t)
+            lives_key = (lives, MAX_LIVES)
+            if lives_key != _lives_key:
+                _lives_surf = draw_lives_badge(f_small, f_heart, lives, MAX_LIVES)
+                _lives_key  = lives_key
+            screen.blit(_lives_surf, (SCREEN_W - 18 - _lives_surf.get_width(), 14))
+
+            draw_warning(screen, warn_surf, warn_x, warn_y, now, last_hand_t)
 
             if game_over:
                 draw_game_over(screen, f_big, f_med, f_hud, score,

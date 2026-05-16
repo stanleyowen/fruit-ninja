@@ -116,14 +116,18 @@ class WebcamTracker(HandTracker):
             return []
 
         t = time.monotonic()
-        h, w = frame.shape[:2]
         samples: list[HandSample] = []
         for i, landmarks in enumerate(result.hand_landmarks[: self.max_hands]):
             # Landmark 9 = middle-finger MCP (stable palm center).
+            # p.x / p.y are normalized 0..1, so multiply directly by screen size.
             p = landmarks[9]
-            sx = p.x * w * (self.screen_w / w)   # simplifies to p.x * screen_w
-            sy = p.y * h * (self.screen_h / h)
-            samples.append(HandSample(hand_id=i, x=sx, y=sy, z=p.z, timestamp=t))
+            samples.append(HandSample(
+                hand_id=i,
+                x=p.x * self.screen_w,
+                y=p.y * self.screen_h,
+                z=p.z,
+                timestamp=t,
+            ))
         return samples
 
     def background_frame(self) -> Optional[np.ndarray]:
