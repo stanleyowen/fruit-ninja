@@ -84,7 +84,8 @@ def _segment_circle_intersects(
     return (0 <= t1 <= 1) or (0 <= t2 <= 1) or (t1 < 0 and t2 > 1)
 
 
-def check_slice(trail: HandTrail, cx: float, cy: float, r: float) -> bool:
+def check_slice(trail: HandTrail, cx: float, cy: float, r: float,
+               speed_threshold: float = SLICE_SPEED_THRESHOLD) -> bool:
     """True if the most recent trail segment is fast AND intersects the circle."""
     seg = trail.latest_segment()
     if seg is None:
@@ -92,6 +93,6 @@ def check_slice(trail: HandTrail, cx: float, cy: float, r: float) -> bool:
     a, b = seg
     dt = max(b.t - a.t, 1e-3)
     speed = math.hypot(b.x - a.x, b.y - a.y) / dt
-    if speed < SLICE_SPEED_THRESHOLD:
+    if speed < speed_threshold:
         return False
     return _segment_circle_intersects(a.x, a.y, b.x, b.y, cx, cy, r)

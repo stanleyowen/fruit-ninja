@@ -44,6 +44,7 @@ class WebcamTracker(HandTracker):
         cam_w: int = 1280,
         cam_h: int = 720,
         model_path: str = _MODEL_FILENAME,
+        existing_cap: Optional[cv2.VideoCapture] = None,
     ):
         self.screen_w = screen_w
         self.screen_h = screen_h
@@ -52,6 +53,7 @@ class WebcamTracker(HandTracker):
         self.cam_h = cam_h
         self.model_path = model_path
         self.max_hands = max_hands
+        self._existing_cap = existing_cap
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._detector: Optional[vision.HandLandmarker] = None
@@ -71,9 +73,13 @@ class WebcamTracker(HandTracker):
         )
         self._detector = vision.HandLandmarker.create_from_options(opts)
 
-        self._cap = cv2.VideoCapture(self.cam_index)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_w)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_h)
+        if self._existing_cap is not None and self._existing_cap.isOpened():
+            # Reuse the cap that was already opened by the camera picker — no re-negotiate.
+            self._cap = self._existing_cap
+        else:
+            self._cap = cv2.VideoCapture(self.cam_index)
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cam_w)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_h)
         if not self._cap.isOpened():
             raise RuntimeError(f"Could not open webcam index {self.cam_index}")
 

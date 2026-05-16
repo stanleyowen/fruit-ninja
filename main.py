@@ -8,10 +8,11 @@ import time
 
 import pygame
 
-from game.camera_picker import detect_cameras, run_camera_picker
+from game.camera_picker import TrackerChoice, run_tracker_picker
 from game.fruit import Fruit, FruitSpawner, split_fruit
 from game.juice import JuiceLayer
 from game.slicer import TrailStore, check_slice
+from game.welcome import run_welcome_screen
 from trackers.base import HandTracker
 
 
@@ -20,14 +21,15 @@ SCREEN_H = 720
 FPS = 60
 
 
-def build_tracker(kind: str, cam_index: int = 0) -> HandTracker:
-    if kind == "webcam":
+def build_tracker(choice: TrackerChoice) -> HandTracker:
+    if choice.tracker_type == "webcam":
         from trackers.webcam import WebcamTracker
-        return WebcamTracker(SCREEN_W, SCREEN_H, cam_index=cam_index)
-    if kind == "kinect":
+        return WebcamTracker(SCREEN_W, SCREEN_H, cam_index=choice.cam_index,
+                             existing_cap=choice.cap)
+    if choice.tracker_type == "kinect":
         from trackers.kinect import KinectTracker
         return KinectTracker(SCREEN_W, SCREEN_H)
-    raise ValueError(f"unknown tracker: {kind}")
+    raise ValueError(f"unknown tracker: {choice.tracker_type}")
 
 
 # ── Background ────────────────────────────────────────────────────────────
@@ -41,14 +43,14 @@ def build_background(w: int, h: int) -> pygame.Surface:
     rng  = random.Random(17)
     surf = pygame.Surface((w, h))
 
-    # ── Gradient sky (dusk palette) ───────────────────────────────────────
+    # ── Gradient sky (vivid dusk palette) ────────────────────────────────
     stops = [
-        (0.00, (18,   8,  52)),   # deep indigo at top
-        (0.20, (60,  18,  90)),   # purple
-        (0.42, (148, 42,  82)),   # rose-crimson
-        (0.62, (210, 88,  48)),   # warm amber
-        (0.80, (235, 148, 52)),   # orange-gold
-        (1.00, (195, 90,  38)),   # deep amber at horizon / ground
+        (0.00, ( 52,  28, 115)),  # rich indigo at top
+        (0.20, ( 98,  38, 148)),  # vivid purple
+        (0.44, (188,  62, 112)),  # strong rose
+        (0.64, (232, 100,  58)),  # warm amber
+        (0.82, (252, 165,  65)),  # bright orange-gold
+        (1.00, (218, 105,  48)),  # deep amber
     ]
     for y in range(h):
         t = y / h
@@ -84,10 +86,9 @@ def build_background(w: int, h: int) -> pygame.Surface:
         x += rng.randint(55, 165)
         pts.append((min(x, w), int(h * rng.uniform(0.52, 0.66))))
     pts += [(w, h)]
-    pygame.draw.polygon(surf, (52, 22, 78), pts)
-    # Faint rim-light along the mountain ridge.
+    pygame.draw.polygon(surf, (72, 32, 108), pts)
     for i in range(1, len(pts) - 1):
-        pygame.draw.line(surf, (88, 42, 110), pts[i - 1], pts[i], 2)
+        pygame.draw.line(surf, (110, 55, 145), pts[i-1], pts[i], 2)
 
     # ── Near mountains (dark, close) ──────────────────────────────────────
     pts2 = [(0, h)]
@@ -96,9 +97,9 @@ def build_background(w: int, h: int) -> pygame.Surface:
         x += rng.randint(40, 120)
         pts2.append((min(x, w), int(h * rng.uniform(0.66, 0.80))))
     pts2 += [(w, h)]
-    pygame.draw.polygon(surf, (22, 10, 40), pts2)
+    pygame.draw.polygon(surf, (32, 15, 55), pts2)
     for i in range(1, len(pts2) - 1):
-        pygame.draw.line(surf, (50, 22, 72), pts2[i - 1], pts2[i], 2)
+        pygame.draw.line(surf, (62, 28, 88), pts2[i-1], pts2[i], 2)
 
     # ── Bamboo silhouettes (left & right edges) ───────────────────────────
     for side_x in [rng.randint(30, 90), rng.randint(55, 110),
@@ -194,33 +195,33 @@ def draw_lives_badge(surf: pygame.Surface, small_font, heart_font,
 
 
 def draw_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
-                   score: int) -> None:
-    # Full-screen dim.
+                   score: int, diff_label: str = "", diff_color: tuple = (220, 60, 60)) -> None:
     overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 190))
+    overlay.fill((0, 0, 0, 195))
     surf.blit(overlay, (0, 0))
 
-    PW, PH = 520, 280
+    PW, PH = 540, 300
     px = SCREEN_W // 2 - PW // 2
     py = SCREEN_H // 2 - PH // 2
 
     panel = pygame.Surface((PW, PH), pygame.SRCALPHA)
-    pygame.draw.rect(panel, (18, 12, 32, 230), (0, 0, PW, PH), border_radius=22)
-    pygame.draw.rect(panel, (220, 60, 60, 140), (0, 0, PW, PH), 3, border_radius=22)
+    pygame.draw.rect(panel, (18, 12, 32, 235), (0, 0, PW, PH), border_radius=22)
+    pygame.draw.rect(panel, (*diff_color, 160), (0, 0, PW, PH), 3, border_radius=22)
     surf.blit(panel, (px, py))
 
-    # "GAME OVER"
-    go  = _txt_shadow(big_font, "GAME OVER", (255, 75, 75), (80, 0, 0), offset=3)
-    surf.blit(go, go.get_rect(centerx=SCREEN_W // 2, top=py + 30))
+    go = _txt_shadow(big_font, "GAME OVER", (255, 75, 75), (80, 0, 0), offset=3)
+    surf.blit(go, go.get_rect(centerx=SCREEN_W // 2, top=py + 24))
 
-    # Final score line
-    sc  = _txt_shadow(med_font, f"Score: {score}", (255, 220, 80), offset=2)
-    surf.blit(sc, sc.get_rect(centerx=SCREEN_W // 2, top=py + 130))
+    if diff_label:
+        dl = _txt_shadow(sm_font, f"Difficulty: {diff_label}", diff_color, offset=1)
+        surf.blit(dl, dl.get_rect(centerx=SCREEN_W // 2, top=py + 110))
 
-    # Restart hint
-    hint = _txt_shadow(sm_font, "Press  R  to restart   •   Esc  to quit",
+    sc = _txt_shadow(med_font, f"Score: {score}", (255, 220, 80), offset=2)
+    surf.blit(sc, sc.get_rect(centerx=SCREEN_W // 2, top=py + 150))
+
+    hint = _txt_shadow(sm_font, "Press  R  to choose difficulty   •   Esc  to quit",
                        (200, 200, 210), offset=1)
-    surf.blit(hint, hint.get_rect(centerx=SCREEN_W // 2, top=py + 200))
+    surf.blit(hint, hint.get_rect(centerx=SCREEN_W // 2, top=py + 240))
 
 
 def draw_warning(surf: pygame.Surface, font, now: float, last_hand_t: float) -> None:
@@ -319,9 +320,10 @@ def draw_trail(surf: pygame.Surface, points: list, color: tuple) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tracker", choices=["webcam", "kinect"], default="webcam")
-    parser.add_argument("--lives", type=int, default=3)
-    parser.add_argument("--cam", type=int, default=None, help="Camera index (skips picker)")
+    parser.add_argument("--tracker", choices=["webcam", "kinect"], default=None,
+                        help="Skip picker and force tracker type")
+    parser.add_argument("--cam", type=int, default=None,
+                        help="Skip picker and use this camera index")
     args = parser.parse_args()
 
     pygame.init()
@@ -329,8 +331,6 @@ def main() -> int:
     pygame.display.set_caption("Hand-tracked Fruit Ninja")
     clock = pygame.time.Clock()
 
-    # Fonts — SysFont can have bg-colour artefacts on macOS; we always render
-    # onto transparent surfaces via _txt() / _txt_shadow() to avoid this.
     f_small  = pygame.font.SysFont("arial", 18, bold=True)
     f_hud    = pygame.font.SysFont("arial", 30, bold=True)
     f_heart  = pygame.font.SysFont("arial", 26)
@@ -338,29 +338,33 @@ def main() -> int:
     f_med    = pygame.font.SysFont("arial", 36, bold=True)
     f_warn   = pygame.font.SysFont("arial", 24, bold=True)
 
-    # Camera selection (webcam mode only).
-    cam_index = 0
-    if args.tracker == "webcam":
-        if args.cam is not None:
-            cam_index = args.cam
-        else:
-            cameras = detect_cameras()
-            if not cameras:
-                print("ERROR: No cameras detected.")
-                pygame.quit()
-                return 1
-            cam_index = run_camera_picker(screen, cameras)
+    # Background built once; shared by all screens.
+    bg_surf = build_background(SCREEN_W, SCREEN_H)
 
-    tracker = build_tracker(args.tracker, cam_index=cam_index)
+    # ── Step 1: device / tracker selection ───────────────────────────────
+    if args.tracker is not None and args.cam is not None:
+        # CLI override: skip the UI entirely.
+        tracker_choice = TrackerChoice(args.tracker, args.cam)
+    elif args.tracker == "kinect":
+        tracker_choice = TrackerChoice("kinect", 0)
+    else:
+        tracker_choice = run_tracker_picker(screen, bg_surf)
+
+    # ── Step 2: difficulty selection ──────────────────────────────────────
+    difficulty = run_welcome_screen(screen, bg_surf)
+
+    # ── Step 3: start tracking ────────────────────────────────────────────
+    tracker = build_tracker(tracker_choice)
     tracker.start()
 
-    bg_surf     = build_background(SCREEN_W, SCREEN_H)
     juice_layer = JuiceLayer(SCREEN_W, SCREEN_H)
-    spawner     = FruitSpawner(SCREEN_W, SCREEN_H)
+    spawner     = FruitSpawner(SCREEN_W, SCREEN_H,
+                               spawn_every=difficulty.spawn_every,
+                               bomb_chance=difficulty.bomb_chance)
     fruits: list[Fruit] = []
     trails      = TrailStore()
 
-    MAX_LIVES   = args.lives
+    MAX_LIVES   = difficulty.lives
     score       = 0
     lives       = MAX_LIVES
     game_over   = False
@@ -377,6 +381,12 @@ def main() -> int:
                     if event.key == pygame.K_ESCAPE:
                         return 0
                     if event.key == pygame.K_r and game_over:
+                        # Return to welcome screen to pick difficulty again.
+                        difficulty  = run_welcome_screen(screen, bg_surf)
+                        spawner     = FruitSpawner(SCREEN_W, SCREEN_H,
+                                                   spawn_every=difficulty.spawn_every,
+                                                   bomb_chance=difficulty.bomb_chance)
+                        MAX_LIVES   = difficulty.lives
                         fruits.clear()
                         juice_layer.clear()
                         score     = 0
@@ -404,7 +414,8 @@ def main() -> int:
                     if f.sliced:
                         continue
                     for trail in trails.trails().values():
-                        if check_slice(trail, f.x, f.y, f.radius):
+                        if check_slice(trail, f.x, f.y, f.radius,
+                                       difficulty.slice_speed):
                             consumed.add(idx)
                             if f.is_bomb:
                                 lives = max(0, lives - 1)
@@ -467,7 +478,8 @@ def main() -> int:
             draw_warning(screen, f_warn, now, last_hand_t)
 
             if game_over:
-                draw_game_over(screen, f_big, f_med, f_hud, score)
+                draw_game_over(screen, f_big, f_med, f_hud, score,
+                               difficulty.label, difficulty.color)
 
             pygame.display.flip()
             clock.tick(FPS)
