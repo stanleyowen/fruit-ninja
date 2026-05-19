@@ -18,12 +18,14 @@ from typing import Optional
 
 from .base import HandSample, HandTracker
 
+_kinect_import_error = ""
 try:
     from pykinect2 import PyKinectV2, PyKinectRuntime
     from pykinect2.PyKinectV2 import JointType_HandLeft, JointType_HandRight
     _KINECT_AVAILABLE = True
-except Exception as _kinect_import_error:
+except Exception as e:
     _KINECT_AVAILABLE = False
+    _kinect_import_error = str(e)
 
 
 # Kinect v2 color frame is 1920x1080.
