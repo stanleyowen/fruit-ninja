@@ -18,12 +18,14 @@ from typing import Optional
 
 from .base import HandSample, HandTracker
 
+_kinect_import_error = ""
 try:
     from pykinect2 import PyKinectV2, PyKinectRuntime
     from pykinect2.PyKinectV2 import JointType_HandLeft, JointType_HandRight
     _KINECT_AVAILABLE = True
-except ImportError:
+except Exception as e:
     _KINECT_AVAILABLE = False
+    _kinect_import_error = str(e)
 
 
 # Kinect v2 color frame is 1920x1080.
@@ -35,8 +37,9 @@ class KinectTracker(HandTracker):
     def __init__(self, screen_w: int, screen_h: int):
         if not _KINECT_AVAILABLE:
             raise RuntimeError(
-                "pykinect2 not installed. Install on Windows with: "
-                "pip install pykinect2 comtypes"
+                f"pykinect2 failed to load: {_kinect_import_error}\n"
+                "Make sure the Kinect for Windows SDK 2.0 is installed: "
+                "https://www.microsoft.com/en-us/download/details.aspx?id=44561"
             )
         self.screen_w = screen_w
         self.screen_h = screen_h
