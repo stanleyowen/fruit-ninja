@@ -26,14 +26,15 @@ SCREEN_H = 720
 FPS = 60
 
 
-def build_tracker(choice: TrackerChoice, max_hands: int = 2) -> HandTracker:
+def build_tracker(choice: TrackerChoice, max_hands: int = 2,
+                  kinect_sensitivity: float = 1.5) -> HandTracker:
     if choice.tracker_type == "webcam":
         from trackers.webcam import WebcamTracker
         return WebcamTracker(SCREEN_W, SCREEN_H, cam_index=choice.cam_index,
                              existing_cap=choice.cap, max_hands=max_hands)
     if choice.tracker_type == "kinect":
         from trackers.kinect import KinectTracker
-        return KinectTracker(SCREEN_W, SCREEN_H)
+        return KinectTracker(SCREEN_W, SCREEN_H, sensitivity=kinect_sensitivity)
     raise ValueError(f"unknown tracker: {choice.tracker_type}")
 
 
@@ -405,6 +406,9 @@ def main() -> int:
                         help="Skip picker and force tracker type")
     parser.add_argument("--cam", type=int, default=None,
                         help="Skip picker and use this camera index")
+    parser.add_argument("--kinect-sensitivity", type=float, default=1.5,
+                        help="Kinect motion amplification (default 1.5). "
+                             "Higher = less hand travel needed (e.g. 2.0 = half the movement).")
     args = parser.parse_args()
 
     pygame.init()
@@ -449,7 +453,8 @@ def main() -> int:
     # ── Step 3: start tracking ────────────────────────────────────────────
     mp        = difficulty.multiplayer
     max_hands = 4 if mp else 2
-    tracker   = build_tracker(tracker_choice, max_hands=max_hands)
+    tracker   = build_tracker(tracker_choice, max_hands=max_hands,
+                              kinect_sensitivity=args.kinect_sensitivity)
     tracker.start()
 
     juice_layer = JuiceLayer(SCREEN_W, SCREEN_H)
@@ -497,7 +502,8 @@ def main() -> int:
                         new_max_hands = 4 if new_mp else 2
                         if new_max_hands != max_hands:
                             tracker.stop()
-                            tracker   = build_tracker(tracker_choice, max_hands=new_max_hands)
+                            tracker   = build_tracker(tracker_choice, max_hands=new_max_hands,
+                                                      kinect_sensitivity=args.kinect_sensitivity)
                             tracker.start()
                             max_hands = new_max_hands
                         mp = new_mp

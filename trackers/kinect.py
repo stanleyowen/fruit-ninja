@@ -47,7 +47,12 @@ _STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
 
 
 class KinectTracker(HandTracker):
-    def __init__(self, screen_w: int, screen_h: int):
+    def __init__(self, screen_w: int, screen_h: int, sensitivity: float = 1.5):
+        """
+        sensitivity > 1.0 zooms in on the center of the depth frame so you
+        need less hand travel to cover the full screen.  1.0 = raw mapping,
+        2.0 = half the physical movement covers the full screen.
+        """
         if not _KINECT_AVAILABLE:
             raise RuntimeError(
                 f"pykinect2 failed to load: {_kinect_import_error}\n"
@@ -56,6 +61,7 @@ class KinectTracker(HandTracker):
             )
         self.screen_w = screen_w
         self.screen_h = screen_h
+        self.sensitivity = sensitivity
         self._kinect = None
         self._dbg_last_print = 0.0   # throttle console output to 1 Hz
         self._dbg_frames     = 0
@@ -106,9 +112,13 @@ class KinectTracker(HandTracker):
                 if not (0 <= pt.x <= KINECT_DEPTH_W and 0 <= pt.y <= KINECT_DEPTH_H):
                     print(f"[Kinect] hand {name}: out-of-bounds depth ({pt.x:.0f}, {pt.y:.0f}) — skipped")
                     continue
-                # Mirror horizontally for selfie view, scale to screen space.
-                sx = (1.0 - pt.x / KINECT_DEPTH_W) * self.screen_w
-                sy = pt.y / KINECT_DEPTH_H * self.screen_h
+                # Normalize to 0..1, zoom in around center, mirror for selfie view.
+                nx = (pt.x / KINECT_DEPTH_W - 0.5) / self.sensitivity + 0.5
+                ny = (pt.y / KINECT_DEPTH_H - 0.5) / self.sensitivity + 0.5
+                nx = max(0.0, min(1.0, nx))
+                ny = max(0.0, min(1.0, ny))
+                sx = (1.0 - nx) * self.screen_w
+                sy = ny * self.screen_h
                 print(f"[Kinect] hand {name}: {state}  depth=({pt.x:.0f},{pt.y:.0f})  screen=({sx:.0f},{sy:.0f})  z={joint.Position.z:.2f}m")
                 samples.append(
                     HandSample(
