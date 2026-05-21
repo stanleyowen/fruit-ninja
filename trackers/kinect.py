@@ -22,7 +22,12 @@ from .base import HandSample, HandTracker
 
 _kinect_import_error = ""
 try:
-    from pykinect2 import PyKinectV2, PyKinectRuntime
+    from pykinect2 import PyKinectV2
+    
+    from pykinect2 import PyKinectRuntime
+    if not hasattr(PyKinectRuntime.PyKinectRuntime, 'body_joints_to_depth_space'):
+        PyKinectRuntime.PyKinectRuntime.body_joints_to_depth_space = PyKinectRuntime.PyKinectRuntime.body_joints_to_depth
+    
     from pykinect2.PyKinectV2 import (
         JointType_HandLeft, JointType_HandRight,
         TrackingState_NotTracked,

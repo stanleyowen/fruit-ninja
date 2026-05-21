@@ -5,7 +5,12 @@ import math
 import random
 import sys
 import time
+import time as _time
 
+# 💡 預防 Python 3.10+ 的 time.clock 崩潰
+if not hasattr(time, 'clock'):
+    time.clock = _time.perf_counter
+    
 import pygame
 
 from game.camera_picker import TrackerChoice, run_tracker_picker
