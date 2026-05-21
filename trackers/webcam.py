@@ -45,6 +45,7 @@ class WebcamTracker(HandTracker):
         cam_h: int = 720,
         model_path: str = _MODEL_FILENAME,
         existing_cap: Optional[cv2.VideoCapture] = None,
+        sensitivity: float = 1.0,
     ):
         self.screen_w = screen_w
         self.screen_h = screen_h
@@ -54,6 +55,7 @@ class WebcamTracker(HandTracker):
         self.model_path = model_path
         self.max_hands = max_hands
         self._existing_cap = existing_cap
+        self.sensitivity = sensitivity
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._detector: Optional[vision.HandLandmarker] = None
@@ -119,12 +121,16 @@ class WebcamTracker(HandTracker):
         samples: list[HandSample] = []
         for i, landmarks in enumerate(result.hand_landmarks[: self.max_hands]):
             # Landmark 9 = middle-finger MCP (stable palm center).
-            # p.x / p.y are normalized 0..1, so multiply directly by screen size.
+            # sensitivity > 1 zooms in on the center so less hand travel covers the screen.
             p = landmarks[9]
+            nx = (p.x - 0.5) / self.sensitivity + 0.5
+            ny = (p.y - 0.5) / self.sensitivity + 0.5
+            nx = max(0.0, min(1.0, nx))
+            ny = max(0.0, min(1.0, ny))
             samples.append(HandSample(
                 hand_id=i,
-                x=p.x * self.screen_w,
-                y=p.y * self.screen_h,
+                x=nx * self.screen_w,
+                y=ny * self.screen_h,
                 z=p.z,
                 timestamp=t,
             ))
