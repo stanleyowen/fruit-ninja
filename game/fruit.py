@@ -7,7 +7,7 @@ from typing import Tuple
 
 import pygame
 
-GRAVITY = 1400.0
+GRAVITY = 2000.0
 
 # (name, skin_color, flesh_color)
 FRUIT_PALETTE: list[Tuple[str, Tuple[int,int,int], Tuple[int,int,int]]] = [
@@ -276,7 +276,7 @@ class FruitSpawner:
     def _spawn(self) -> Fruit:
         x        = self.rng.uniform(0.1, 0.9) * self.screen_w
         target_x = self.rng.uniform(0.3, 0.7) * self.screen_w
-        rise_h   = self.rng.uniform(0.45, 0.65) * self.screen_h
+        rise_h   = self.rng.uniform(0.55, 0.85) * self.screen_h
         vy       = -math.sqrt(2 * GRAVITY * rise_h)
         t_peak   = -vy / GRAVITY
         vx       = (target_x - x) / max(t_peak, 0.1)

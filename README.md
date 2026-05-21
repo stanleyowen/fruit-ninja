@@ -98,3 +98,24 @@ Uncomment `pykinect2` and `comtypes` in `requirements.txt`, install them, then r
 ```bash
 python main.py --tracker kinect
 ```
+
+## The problem in source code of Pykinect2
+Add this function after the function "body_joints_to_color_space" in PyKinectRuntime.py
+```python
+def body_joints_to_depth(self, joints):
+    joint_points = numpy.ndarray((PyKinectV2.JointType_Count), dtype=object)
+
+    for i in range(PyKinectV2.JointType_Count):
+        joint_points[i] = self._mapper.MapCameraPointToDepthSpace(joints[i].Position)
+
+    return joint_points
+
+```
+
+Then rewrite the ```numpy.object``` to ```object``` in PyKinectRuntime.py
+
+Delete this two line of code in PyKinectV2.py
+```
+assert sizeof(tagSTATSTG) == 72, sizeof(tagSTATSTG)
+from comtypes import _check_version; _check_version('')
+```
