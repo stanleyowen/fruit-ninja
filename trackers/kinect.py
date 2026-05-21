@@ -18,16 +18,19 @@ import math
 import time
 from typing import Optional
 
+import cv2
+import numpy as np
+
 from .base import HandSample, HandTracker
 
 _kinect_import_error = ""
 try:
     from pykinect2 import PyKinectV2
-    
+
     from pykinect2 import PyKinectRuntime
     if not hasattr(PyKinectRuntime.PyKinectRuntime, 'body_joints_to_depth_space'):
         PyKinectRuntime.PyKinectRuntime.body_joints_to_depth_space = PyKinectRuntime.PyKinectRuntime.body_joints_to_depth
-    
+
     from pykinect2.PyKinectV2 import (
         JointType_HandLeft, JointType_HandRight,
         TrackingState_NotTracked,
@@ -42,6 +45,7 @@ except Exception as e:
 KINECT_DEPTH_W = 512
 KINECT_DEPTH_H = 424
 
+_PREVIEW_WIN = "Kinect Preview"
 
 _STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
 
@@ -69,13 +73,38 @@ class KinectTracker(HandTracker):
 
     def start(self) -> None:
         self._kinect = PyKinectRuntime.PyKinectRuntime(
-            PyKinectV2.FrameSourceTypes_Body
+            PyKinectV2.FrameSourceTypes_Body | PyKinectV2.FrameSourceTypes_Depth
         )
+        cv2.namedWindow(_PREVIEW_WIN, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(_PREVIEW_WIN, KINECT_DEPTH_W, KINECT_DEPTH_H)
 
     def stop(self) -> None:
         if self._kinect is not None:
             self._kinect.close()
             self._kinect = None
+        cv2.destroyWindow(_PREVIEW_WIN)
+
+    def _draw_preview(self, hand_depth_pts: list[tuple[float, float]]) -> None:
+        """Grab the latest depth frame, colorize it, overlay hand dots, show it."""
+        if not self._kinect.has_new_depth_frame():
+            return
+        raw = self._kinect.get_last_depth_frame()
+        if raw is None:
+            return
+
+        # raw is a flat uint16 array; reshape and normalize 500–5000 mm → 0–255.
+        depth = raw.reshape((KINECT_DEPTH_H, KINECT_DEPTH_W)).astype(np.float32)
+        depth_u8 = np.clip((depth - 500) / 4500 * 255, 0, 255).astype(np.uint8)
+        preview = cv2.applyColorMap(depth_u8, cv2.COLORMAP_TURBO)
+
+        # Draw a circle for each tracked hand in depth-space.
+        for (dx, dy) in hand_depth_pts:
+            ix, iy = int(dx), int(dy)
+            cv2.circle(preview, (ix, iy), 18, (255, 255, 255), 3)
+            cv2.circle(preview, (ix, iy), 6,  (255, 255, 255), -1)
+
+        cv2.imshow(_PREVIEW_WIN, preview)
+        cv2.waitKey(1)
 
     def poll(self) -> list[HandSample]:
         if self._kinect is None or not self._kinect.has_new_body_frame():
@@ -87,6 +116,7 @@ class KinectTracker(HandTracker):
 
         t = time.monotonic()
         samples: list[HandSample] = []
+        hand_depth_pts: list[tuple[float, float]] = []
         hand_id = 0
 
         tracked_bodies = 0
@@ -112,6 +142,7 @@ class KinectTracker(HandTracker):
                 if not (0 <= pt.x <= KINECT_DEPTH_W and 0 <= pt.y <= KINECT_DEPTH_H):
                     print(f"[Kinect] hand {name}: out-of-bounds depth ({pt.x:.0f}, {pt.y:.0f}) — skipped")
                     continue
+                hand_depth_pts.append((pt.x, pt.y))
                 # Normalize to 0..1, zoom in around center, scale to screen.
                 nx = (pt.x / KINECT_DEPTH_W - 0.5) / self.sensitivity + 0.5
                 ny = (pt.y / KINECT_DEPTH_H - 0.5) / self.sensitivity + 0.5
@@ -130,8 +161,8 @@ class KinectTracker(HandTracker):
                     )
                 )
                 hand_id += 1
-            # Only first tracked body — multi-player is a follow-up.
-            break
+
+        self._draw_preview(hand_depth_pts)
 
         # Throttled summary: once per second show frame + body count.
         self._dbg_frames += 1
