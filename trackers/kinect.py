@@ -8,11 +8,13 @@ To use:
     tracker = KinectTracker(screen_w, screen_h)
 
 This implementation reads the BodyFrameSource, picks the closest tracked
-body, and converts the HandLeft / HandRight joints from Kinect camera-space
-(meters) to color-space pixels, then to screen-space pixels.
+body, and converts the HandLeft / HandRight joints to depth-space pixels
+(512×424) via the public body_joints_to_depth_space API, then scales to
+screen-space pixels.
 """
 from __future__ import annotations
 
+import math
 import time
 from typing import Optional
 
@@ -21,16 +23,19 @@ from .base import HandSample, HandTracker
 _kinect_import_error = ""
 try:
     from pykinect2 import PyKinectV2, PyKinectRuntime
-    from pykinect2.PyKinectV2 import JointType_HandLeft, JointType_HandRight
+    from pykinect2.PyKinectV2 import (
+        JointType_HandLeft, JointType_HandRight,
+        TrackingState_NotTracked,
+    )
     _KINECT_AVAILABLE = True
 except Exception as e:
     _KINECT_AVAILABLE = False
     _kinect_import_error = str(e)
 
 
-# Kinect v2 color frame is 1920x1080.
-KINECT_COLOR_W = 1920
-KINECT_COLOR_H = 1080
+# Kinect v2 depth frame dimensions.
+KINECT_DEPTH_W = 512
+KINECT_DEPTH_H = 424
 
 
 class KinectTracker(HandTracker):
@@ -71,16 +76,21 @@ class KinectTracker(HandTracker):
             if not body.is_tracked:
                 continue
             joints = body.joints
+            # Public API: maps all joints to depth-space (512×424) in one call.
+            # Avoids the private _mapper which needs the color stream open.
+            depth_pts = self._kinect.body_joints_to_depth_space(joints)
             for joint_type in (JointType_HandLeft, JointType_HandRight):
                 joint = joints[joint_type]
-                # Camera-space (meters) -> color-space (px) using mapper.
-                pt = self._kinect._mapper.MapCameraPointToColorSpace(joint.Position)
-                if pt.x != pt.x or pt.y != pt.y:  # NaN check
+                if joint.TrackingState == TrackingState_NotTracked:
                     continue
-                # Mirror horizontally for selfie view.
-                cx = KINECT_COLOR_W - pt.x
-                sx = cx * (self.screen_w / KINECT_COLOR_W)
-                sy = pt.y * (self.screen_h / KINECT_COLOR_H)
+                pt = depth_pts[joint_type]
+                if not math.isfinite(pt.x) or not math.isfinite(pt.y):
+                    continue
+                if not (0 <= pt.x <= KINECT_DEPTH_W and 0 <= pt.y <= KINECT_DEPTH_H):
+                    continue
+                # Mirror horizontally for selfie view, scale to screen space.
+                sx = (1.0 - pt.x / KINECT_DEPTH_W) * self.screen_w
+                sy = pt.y / KINECT_DEPTH_H * self.screen_h
                 samples.append(
                     HandSample(
                         hand_id=hand_id,
