@@ -425,11 +425,16 @@ def main() -> int:
     warn_surf, warn_x, warn_y = _build_warn_surf(f_warn)
 
     # ── Step 1: device / tracker selection ───────────────────────────────
-    if args.tracker is not None and args.cam is not None:
-        # CLI override: skip the UI entirely.
-        tracker_choice = TrackerChoice(args.tracker, args.cam)
+    if args.tracker == "webcam" and args.cam is not None:
+        tracker_choice = TrackerChoice("webcam", args.cam)
     elif args.tracker == "kinect":
-        tracker_choice = TrackerChoice("kinect", 0)
+        from game.camera_picker import _kinect_status
+        ok, _msg = _kinect_status()
+        if ok:
+            tracker_choice = TrackerChoice("kinect", 0)
+        else:
+            print(f"Kinect unavailable ({_msg}); opening device picker.", file=sys.stderr)
+            tracker_choice = run_tracker_picker(screen, bg_surf)
     else:
         tracker_choice = run_tracker_picker(screen, bg_surf)
 
