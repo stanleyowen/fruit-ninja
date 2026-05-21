@@ -27,11 +27,13 @@ FPS = 60
 
 
 def build_tracker(choice: TrackerChoice, max_hands: int = 2,
+                  sensitivity: float = 1.0,
                   kinect_sensitivity: float = 1.5) -> HandTracker:
     if choice.tracker_type == "webcam":
         from trackers.webcam import WebcamTracker
         return WebcamTracker(SCREEN_W, SCREEN_H, cam_index=choice.cam_index,
-                             existing_cap=choice.cap, max_hands=max_hands)
+                             existing_cap=choice.cap, max_hands=max_hands,
+                             sensitivity=sensitivity)
     if choice.tracker_type == "kinect":
         from trackers.kinect import KinectTracker
         return KinectTracker(SCREEN_W, SCREEN_H, sensitivity=kinect_sensitivity)
@@ -379,45 +381,70 @@ def draw_bomb_fire(surf: pygame.Surface, f: "Fruit", now: float) -> None:
 
 # ── Bomb explosion ────────────────────────────────────────────────────────
 
-EXPLOSION_DURATION = 0.65
+EXPLOSION_DURATION = 0.90
+BOMB_FLASH_DUR     = 0.55
 
 def draw_explosion(surf: pygame.Surface, x: float, y: float, elapsed: float) -> None:
     """Animated shockwave + sparks drawn at (x, y). elapsed = seconds since detonation."""
     t = min(elapsed / EXPLOSION_DURATION, 1.0)
     cx, cy = int(x), int(y)
-    MAX_R = 160
+    MAX_R = 240
     size  = MAX_R * 2 + 20
     ov    = pygame.Surface((size, size), pygame.SRCALPHA)
     ox = oy = size // 2
 
-    # Central flash — bright burst that fades in the first 40 % of lifetime.
-    if t < 0.40:
-        ft      = t / 0.40
-        flash_r = int(30 + 80 * ft)
-        flash_a = int(220 * (1.0 - ft))
-        pygame.draw.circle(ov, (255, 230, 100, flash_a), (ox, oy), flash_r)
+    # Central fireball — hot white core blooming outward in the first 35 %.
+    if t < 0.35:
+        ft      = t / 0.35
+        core_r  = int(20 + 110 * ft)
+        core_a  = int(255 * (1.0 - ft))
+        pygame.draw.circle(ov, (255, 255, 220, core_a), (ox, oy), core_r)
+        # Orange halo around core.
+        halo_r = int(core_r * 1.45)
+        halo_a = int(180 * (1.0 - ft))
+        pygame.draw.circle(ov, (255, 140, 20, halo_a), (ox, oy), halo_r)
 
-    # Expanding shockwave ring.
-    ring_r = int(12 + t * (MAX_R - 12))
+    # Primary shockwave ring.
+    ring_r = int(18 + t * (MAX_R - 18))
     ring_a = int(255 * (1.0 - t * t))
-    ring_w = max(2, int(14 * (1.0 - t)))
+    ring_w = max(2, int(18 * (1.0 - t)))
     pygame.draw.circle(ov, (255, 110, 20, ring_a), (ox, oy), ring_r, ring_w)
-    # Inner softer ring for volume.
+
+    # Secondary slower ring (offset phase).
+    ring2_t = max(0.0, t - 0.12)
+    ring2_r = int(18 + ring2_t * (MAX_R * 0.7 - 18))
+    ring2_a = int(200 * (1.0 - ring2_t * ring2_t))
+    pygame.draw.circle(ov, (255, 200, 60, ring2_a), (ox, oy), ring2_r,
+                       max(2, int(10 * (1.0 - ring2_t))))
+
+    # Inner fill glow.
     inner_r = max(1, ring_r - ring_w - 2)
-    pygame.draw.circle(ov, (255, 200, 80, ring_a // 3), (ox, oy), inner_r, max(1, ring_w // 2))
+    pygame.draw.circle(ov, (255, 200, 80, ring_a // 4), (ox, oy), inner_r,
+                       max(1, ring_w // 2))
 
     # Flying sparks — deterministic per position so they don't jitter frame to frame.
     rng = random.Random(int(x) ^ (int(y) << 16))
-    et  = t * EXPLOSION_DURATION          # real seconds elapsed
-    for _ in range(16):
+    et  = t * EXPLOSION_DURATION
+    for _ in range(30):
         angle = rng.uniform(0, math.tau)
-        speed = rng.uniform(130, 300)
+        speed = rng.uniform(180, 420)
         sx    = int(ox + math.cos(angle) * speed * et)
-        sy    = int(oy + math.sin(angle) * speed * et + 180 * et * et)  # gravity
-        sr    = max(1, int(5 * (1.0 - t * 0.85)))
+        sy    = int(oy + math.sin(angle) * speed * et + 260 * et * et)  # gravity
+        sr    = max(1, int(7 * (1.0 - t * 0.80)))
         sa    = int(255 * (1.0 - t))
-        gc    = int(max(0, 150 - 150 * t))
+        gc    = int(max(0, 160 - 160 * t))
         pygame.draw.circle(ov, (255, gc, 0, sa), (sx, sy), sr)
+    # Smaller white-hot debris.
+    rng2 = random.Random((int(x) + 1) ^ (int(y) << 8))
+    for _ in range(14):
+        angle = rng2.uniform(0, math.tau)
+        speed = rng2.uniform(80, 200)
+        sx    = int(ox + math.cos(angle) * speed * et)
+        sy    = int(oy + math.sin(angle) * speed * et + 140 * et * et)
+        sr    = max(1, int(4 * (1.0 - t)))
+        sa    = int(240 * (1.0 - t * 1.2))
+        if sa > 0:
+            pygame.draw.circle(ov, (255, 255, 200, sa), (sx, sy), sr)
 
     surf.blit(ov, (cx - ox, cy - oy))
 
@@ -451,9 +478,12 @@ def main() -> int:
                         help="Skip picker and force tracker type")
     parser.add_argument("--cam", type=int, default=None,
                         help="Skip picker and use this camera index")
+    parser.add_argument("--sensitivity", type=float, default=1.0,
+                        help="Webcam cursor sensitivity (default 1.0). "
+                             "Higher = less hand travel needed (e.g. 1.5 = zoomed-in mapping).")
     parser.add_argument("--kinect-sensitivity", type=float, default=0.5,
-                        help="Kinect motion amplification (default 1.5). "
-                             "Higher = less hand travel needed (e.g. 2.0 = half the movement).")
+                        help="Kinect motion amplification (default 0.5). "
+                             "Higher = less hand travel needed.")
     args = parser.parse_args()
 
     pygame.init()
@@ -474,6 +504,10 @@ def main() -> int:
     # Cached single-color overlay — reused every flash frame instead of re-allocated.
     flash_overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
     flash_overlay.fill((255, 50, 50, 100))
+
+    # Bomb flash: plain surface so set_alpha() can fade it dynamically each frame.
+    bomb_flash_surf = pygame.Surface((SCREEN_W, SCREEN_H))
+    bomb_flash_surf.fill((255, 245, 180))
 
     # Warning banner built once; set_alpha() animates it each frame.
     warn_surf, warn_x, warn_y = _build_warn_surf(f_warn)
@@ -499,6 +533,7 @@ def main() -> int:
     mp        = difficulty.multiplayer
     max_hands = 4 if mp else 2
     tracker   = build_tracker(tracker_choice, max_hands=max_hands,
+                              sensitivity=args.sensitivity,
                               kinect_sensitivity=args.kinect_sensitivity)
     tracker.start()
 
@@ -514,8 +549,9 @@ def main() -> int:
     lives       = MAX_LIVES
     team_scores = [0, 0]       # only used in 2v2 mode
     time_left   = difficulty.time_limit
-    game_over   = False
-    flash_until = 0.0
+    game_over        = False
+    flash_until      = 0.0
+    bomb_flash_until = 0.0
     explosions: list[tuple[float, float, float]] = []   # (x, y, start_time)
     last_hand_t = time.monotonic()
     last_t      = time.monotonic()
@@ -549,6 +585,7 @@ def main() -> int:
                         if new_max_hands != max_hands:
                             tracker.stop()
                             tracker   = build_tracker(tracker_choice, max_hands=new_max_hands,
+                                                      sensitivity=args.sensitivity,
                                                       kinect_sensitivity=args.kinect_sensitivity)
                             tracker.start()
                             max_hands = new_max_hands
@@ -564,7 +601,9 @@ def main() -> int:
                         lives       = MAX_LIVES
                         team_scores = [0, 0]
                         time_left   = difficulty.time_limit
-                        game_over   = False
+                        game_over        = False
+                        flash_until      = 0.0
+                        bomb_flash_until = 0.0
                         explosions.clear()
                         # Invalidate all caches.
                         _score_val = -1;  _lives_key = (-1, -1)
@@ -604,10 +643,12 @@ def main() -> int:
                                 explosions.append((f.x, f.y, now))
                                 if mp:
                                     team = trail_id // 2
-                                    team_scores[team] = max(0, team_scores[team] - 1)
+                                    team_scores[team] = max(0, team_scores[team] - 5)
                                 else:
                                     lives = max(0, lives - 1)
-                                    flash_until = now + 0.3
+                                    score = max(0, score - 5)
+                                    bomb_flash_until = now + BOMB_FLASH_DUR
+                                    flash_until = now + 0.25
                                     if lives == 0:
                                         game_over = True
                             else:
@@ -662,7 +703,14 @@ def main() -> int:
                     pygame.draw.circle(screen, color, (cx, cy), 14, 2)
                     pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 6)
 
-            if now < flash_until:               # 6. Hit flash
+            if now < bomb_flash_until:          # 6a. Bomb flash (bright white/yellow, fades)
+                elapsed_bf = BOMB_FLASH_DUR - (bomb_flash_until - now)
+                t_bf = elapsed_bf / BOMB_FLASH_DUR
+                alpha_bf = int(230 * (1.0 - t_bf) ** 0.4)  # fast bright → slow fade
+                bomb_flash_surf.set_alpha(alpha_bf)
+                screen.blit(bomb_flash_surf, (0, 0))
+
+            if now < flash_until:               # 6b. Hit flash (red)
                 screen.blit(flash_overlay, (0, 0))
 
             if mp:                              # 7. HUD
