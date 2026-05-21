@@ -161,8 +161,8 @@ class KinectTracker(HandTracker):
                     )
                 )
                 hand_id += 1
-            # Only first tracked body — multi-player is a follow-up.
-            break
+
+        self._draw_preview(hand_depth_pts)
 
         self._draw_preview(hand_depth_pts)
 
