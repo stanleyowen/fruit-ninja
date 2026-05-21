@@ -112,12 +112,12 @@ class KinectTracker(HandTracker):
                 if not (0 <= pt.x <= KINECT_DEPTH_W and 0 <= pt.y <= KINECT_DEPTH_H):
                     print(f"[Kinect] hand {name}: out-of-bounds depth ({pt.x:.0f}, {pt.y:.0f}) — skipped")
                     continue
-                # Normalize to 0..1, zoom in around center, mirror for selfie view.
+                # Normalize to 0..1, zoom in around center, scale to screen.
                 nx = (pt.x / KINECT_DEPTH_W - 0.5) / self.sensitivity + 0.5
                 ny = (pt.y / KINECT_DEPTH_H - 0.5) / self.sensitivity + 0.5
                 nx = max(0.0, min(1.0, nx))
                 ny = max(0.0, min(1.0, ny))
-                sx = (1.0 - nx) * self.screen_w
+                sx = nx * self.screen_w
                 sy = ny * self.screen_h
                 print(f"[Kinect] hand {name}: {state}  depth=({pt.x:.0f},{pt.y:.0f})  screen=({sx:.0f},{sy:.0f})  z={joint.Position.z:.2f}m")
                 samples.append(
