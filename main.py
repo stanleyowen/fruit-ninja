@@ -377,6 +377,51 @@ def draw_bomb_fire(surf: pygame.Surface, f: "Fruit", now: float) -> None:
     surf.blit(fs, (cx - FW // 2, cy - r - FH + 10))
 
 
+# ── Bomb explosion ────────────────────────────────────────────────────────
+
+EXPLOSION_DURATION = 0.65
+
+def draw_explosion(surf: pygame.Surface, x: float, y: float, elapsed: float) -> None:
+    """Animated shockwave + sparks drawn at (x, y). elapsed = seconds since detonation."""
+    t = min(elapsed / EXPLOSION_DURATION, 1.0)
+    cx, cy = int(x), int(y)
+    MAX_R = 160
+    size  = MAX_R * 2 + 20
+    ov    = pygame.Surface((size, size), pygame.SRCALPHA)
+    ox = oy = size // 2
+
+    # Central flash — bright burst that fades in the first 40 % of lifetime.
+    if t < 0.40:
+        ft      = t / 0.40
+        flash_r = int(30 + 80 * ft)
+        flash_a = int(220 * (1.0 - ft))
+        pygame.draw.circle(ov, (255, 230, 100, flash_a), (ox, oy), flash_r)
+
+    # Expanding shockwave ring.
+    ring_r = int(12 + t * (MAX_R - 12))
+    ring_a = int(255 * (1.0 - t * t))
+    ring_w = max(2, int(14 * (1.0 - t)))
+    pygame.draw.circle(ov, (255, 110, 20, ring_a), (ox, oy), ring_r, ring_w)
+    # Inner softer ring for volume.
+    inner_r = max(1, ring_r - ring_w - 2)
+    pygame.draw.circle(ov, (255, 200, 80, ring_a // 3), (ox, oy), inner_r, max(1, ring_w // 2))
+
+    # Flying sparks — deterministic per position so they don't jitter frame to frame.
+    rng = random.Random(int(x) ^ (int(y) << 16))
+    et  = t * EXPLOSION_DURATION          # real seconds elapsed
+    for _ in range(16):
+        angle = rng.uniform(0, math.tau)
+        speed = rng.uniform(130, 300)
+        sx    = int(ox + math.cos(angle) * speed * et)
+        sy    = int(oy + math.sin(angle) * speed * et + 180 * et * et)  # gravity
+        sr    = max(1, int(5 * (1.0 - t * 0.85)))
+        sa    = int(255 * (1.0 - t))
+        gc    = int(max(0, 150 - 150 * t))
+        pygame.draw.circle(ov, (255, gc, 0, sa), (sx, sy), sr)
+
+    surf.blit(ov, (cx - ox, cy - oy))
+
+
 # ── Slash trail ───────────────────────────────────────────────────────────
 
 def draw_trail(surf: pygame.Surface, points: list, color: tuple) -> None:
@@ -406,7 +451,7 @@ def main() -> int:
                         help="Skip picker and force tracker type")
     parser.add_argument("--cam", type=int, default=None,
                         help="Skip picker and use this camera index")
-    parser.add_argument("--kinect-sensitivity", type=float, default=1.5,
+    parser.add_argument("--kinect-sensitivity", type=float, default=0.5,
                         help="Kinect motion amplification (default 1.5). "
                              "Higher = less hand travel needed (e.g. 2.0 = half the movement).")
     args = parser.parse_args()
@@ -471,6 +516,7 @@ def main() -> int:
     time_left   = difficulty.time_limit
     game_over   = False
     flash_until = 0.0
+    explosions: list[tuple[float, float, float]] = []   # (x, y, start_time)
     last_hand_t = time.monotonic()
     last_t      = time.monotonic()
 
@@ -519,6 +565,7 @@ def main() -> int:
                         team_scores = [0, 0]
                         time_left   = difficulty.time_limit
                         game_over   = False
+                        explosions.clear()
                         # Invalidate all caches.
                         _score_val = -1;  _lives_key = (-1, -1)
                         _mp_a_val = _mp_b_val = _mp_timer_secs = -1
@@ -554,6 +601,7 @@ def main() -> int:
                             consumed.add(idx)
                             if f.is_bomb:
                                 juice_layer.splat(f.x, f.y, "bomb", f.radius)
+                                explosions.append((f.x, f.y, now))
                                 if mp:
                                     team = trail_id // 2
                                     team_scores[team] = max(0, team_scores[team] - 1)
@@ -599,7 +647,12 @@ def main() -> int:
                 if f.is_bomb and not f.sliced:
                     draw_bomb_fire(screen, f, now)
 
-            for hand_id, trail in trails.trails().items():   # 4. Slash trails
+            explosions = [(ex, ey, et) for ex, ey, et in explosions  # 4. Explosions
+                          if now - et < EXPLOSION_DURATION]
+            for ex, ey, et in explosions:
+                draw_explosion(screen, ex, ey, now - et)
+
+            for hand_id, trail in trails.trails().items():   # 5. Slash trails
                 pts   = list(trail.points)
                 color = (_MP_TRAIL_COLORS.get(hand_id, (255, 200, 80)) if mp
                          else ((255, 200, 80) if hand_id == 0 else (120, 200, 255)))
@@ -609,10 +662,10 @@ def main() -> int:
                     pygame.draw.circle(screen, color, (cx, cy), 14, 2)
                     pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 6)
 
-            if now < flash_until:               # 5. Hit flash
+            if now < flash_until:               # 6. Hit flash
                 screen.blit(flash_overlay, (0, 0))
 
-            if mp:                              # 6. HUD
+            if mp:                              # 7. HUD
                 if team_scores[0] != _mp_a_val:
                     _mp_a_surf = draw_mp_team_badge(f_small, f_hud, 0, team_scores[0])
                     _mp_a_val  = team_scores[0]

@@ -47,7 +47,7 @@ _STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
 
 
 class KinectTracker(HandTracker):
-    def __init__(self, screen_w: int, screen_h: int, sensitivity: float = 1.5):
+    def __init__(self, screen_w: int, screen_h: int, sensitivity: float = 0.5):
         """
         sensitivity > 1.0 zooms in on the center of the depth frame so you
         need less hand travel to cover the full screen.  1.0 = raw mapping,
