@@ -38,6 +38,9 @@ KINECT_DEPTH_W = 512
 KINECT_DEPTH_H = 424
 
 
+_STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
+
+
 class KinectTracker(HandTracker):
     def __init__(self, screen_w: int, screen_h: int):
         if not _KINECT_AVAILABLE:
@@ -49,6 +52,9 @@ class KinectTracker(HandTracker):
         self.screen_w = screen_w
         self.screen_h = screen_h
         self._kinect = None
+        self._dbg_last_print = 0.0   # throttle console output to 1 Hz
+        self._dbg_frames     = 0
+        self._dbg_no_body    = 0
 
     def start(self) -> None:
         self._kinect = PyKinectRuntime.PyKinectRuntime(
@@ -72,25 +78,33 @@ class KinectTracker(HandTracker):
         samples: list[HandSample] = []
         hand_id = 0
 
+        tracked_bodies = 0
         for body in bodies.bodies:
             if not body.is_tracked:
                 continue
+            tracked_bodies += 1
             joints = body.joints
             # Public API: maps all joints to depth-space (512×424) in one call.
             # Avoids the private _mapper which needs the color stream open.
             depth_pts = self._kinect.body_joints_to_depth_space(joints)
             for joint_type in (JointType_HandLeft, JointType_HandRight):
                 joint = joints[joint_type]
+                name  = "L" if joint_type == JointType_HandLeft else "R"
+                state = _STATE_NAMES.get(joint.TrackingState, str(joint.TrackingState))
                 if joint.TrackingState == TrackingState_NotTracked:
+                    print(f"[Kinect] hand {name}: {state} — skipped")
                     continue
                 pt = depth_pts[joint_type]
                 if not math.isfinite(pt.x) or not math.isfinite(pt.y):
+                    print(f"[Kinect] hand {name}: non-finite depth coords ({pt.x}, {pt.y}) — skipped")
                     continue
                 if not (0 <= pt.x <= KINECT_DEPTH_W and 0 <= pt.y <= KINECT_DEPTH_H):
+                    print(f"[Kinect] hand {name}: out-of-bounds depth ({pt.x:.0f}, {pt.y:.0f}) — skipped")
                     continue
                 # Mirror horizontally for selfie view, scale to screen space.
                 sx = (1.0 - pt.x / KINECT_DEPTH_W) * self.screen_w
                 sy = pt.y / KINECT_DEPTH_H * self.screen_h
+                print(f"[Kinect] hand {name}: {state}  depth=({pt.x:.0f},{pt.y:.0f})  screen=({sx:.0f},{sy:.0f})  z={joint.Position.z:.2f}m")
                 samples.append(
                     HandSample(
                         hand_id=hand_id,
@@ -103,5 +117,19 @@ class KinectTracker(HandTracker):
                 hand_id += 1
             # Only first tracked body — multi-player is a follow-up.
             break
+
+        # Throttled summary: once per second show frame + body count.
+        self._dbg_frames += 1
+        if tracked_bodies == 0:
+            self._dbg_no_body += 1
+        now = time.monotonic()
+        if now - self._dbg_last_print >= 1.0:
+            print(
+                f"[Kinect] frames={self._dbg_frames}  tracked_bodies={tracked_bodies}"
+                f"  no_body_frames={self._dbg_no_body}  hands_emitted={len(samples)}"
+            )
+            self._dbg_frames  = 0
+            self._dbg_no_body = 0
+            self._dbg_last_print = now
 
         return samples
