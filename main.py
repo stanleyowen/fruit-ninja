@@ -233,18 +233,16 @@ def draw_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
 # ── Multiplayer HUD ───────────────────────────────────────────────────────
 
 _MP_TRAIL_COLORS: dict[int, tuple] = {
-    0: (255,  90,  90),   # Team A hand 1 — red
-    1: (255, 160,  60),   # Team A hand 2 — orange
-    2: ( 80, 180, 255),   # Team B hand 1 — blue
-    3: (100, 255, 200),   # Team B hand 2 — cyan
+    0: (255,  90,  90),   # Player 1 — red
+    1: ( 80, 180, 255),   # Player 2 — blue
 }
 
 
-def draw_mp_team_badge(small_font, big_font, team: int, score: int) -> pygame.Surface:
+def draw_mp_player_badge(small_font, big_font, player: int, score: int) -> pygame.Surface:
     W, H = 170, 68
     badge = pygame.Surface((W, H), pygame.SRCALPHA)
-    color = (220, 60, 60) if team == 0 else (60, 140, 220)
-    label = "TEAM  A" if team == 0 else "TEAM  B"
+    color = (220, 60, 60) if player == 0 else (60, 140, 220)
+    label = "PLAYER  1" if player == 0 else "PLAYER  2"
     pygame.draw.rect(badge, (0, 0, 0, 170), (0, 0, W, H), border_radius=14)
     pygame.draw.rect(badge, (*color, 100), (0, 0, W, H), 2, border_radius=14)
     lbl = _txt(small_font, label, color)
@@ -270,16 +268,16 @@ def draw_mp_timer_badge(small_font, big_font, time_left: float) -> pygame.Surfac
 
 
 def draw_mp_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
-                      team_scores: list[int]) -> None:
+                      player_scores: list[int]) -> None:
     overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 195))
     surf.blit(overlay, (0, 0))
 
-    a, b = team_scores
+    a, b = player_scores
     if a > b:
-        winner, color = "TEAM A WINS!", (220, 60, 60)
+        winner, color = "PLAYER 1 WINS!", (220, 60, 60)
     elif b > a:
-        winner, color = "TEAM B WINS!", (60, 140, 220)
+        winner, color = "PLAYER 2 WINS!", (60, 140, 220)
     else:
         winner, color = "IT'S A DRAW!", (200, 185, 100)
 
@@ -295,8 +293,8 @@ def draw_mp_game_over(surf: pygame.Surface, big_font, med_font, sm_font,
     go = _txt_shadow(big_font, winner, color, (40, 0, 40), offset=3)
     surf.blit(go, go.get_rect(centerx=SCREEN_W // 2, top=py + 28))
 
-    sc_a = _txt_shadow(med_font, f"Team A:  {a}", (220, 80, 80), offset=2)
-    sc_b = _txt_shadow(med_font, f"Team B:  {b}", (80, 160, 255), offset=2)
+    sc_a = _txt_shadow(med_font, f"Player 1:  {a}", (220, 80, 80), offset=2)
+    sc_b = _txt_shadow(med_font, f"Player 2:  {b}", (80, 160, 255), offset=2)
     surf.blit(sc_a, sc_a.get_rect(centerx=SCREEN_W // 2, top=py + 130))
     surf.blit(sc_b, sc_b.get_rect(centerx=SCREEN_W // 2, top=py + 182))
 
@@ -531,8 +529,7 @@ def main() -> int:
 
     # ── Step 3: start tracking ────────────────────────────────────────────
     mp        = difficulty.multiplayer
-    max_hands = 4 if mp else 2
-    tracker   = build_tracker(tracker_choice, max_hands=max_hands,
+    tracker   = build_tracker(tracker_choice, max_hands=2,
                               sensitivity=args.sensitivity,
                               kinect_sensitivity=args.kinect_sensitivity)
     tracker.start()
@@ -544,11 +541,11 @@ def main() -> int:
     fruits: list[Fruit] = []
     trails      = TrailStore()
 
-    MAX_LIVES   = difficulty.lives
-    score       = 0
-    lives       = MAX_LIVES
-    team_scores = [0, 0]       # only used in 2v2 mode
-    time_left   = difficulty.time_limit
+    MAX_LIVES     = difficulty.lives
+    score         = 0
+    lives         = MAX_LIVES
+    player_scores = [0, 0]       # only used in 1v1 mode
+    time_left     = difficulty.time_limit
     game_over        = False
     flash_until      = 0.0
     bomb_flash_until = 0.0
@@ -563,10 +560,10 @@ def main() -> int:
     _lives_key: tuple[int, int] = (-1, -1)
 
     # Multiplayer HUD badge caches.
-    _mp_a_surf:     pygame.Surface | None = None
-    _mp_a_val       = -1
-    _mp_b_surf:     pygame.Surface | None = None
-    _mp_b_val       = -1
+    _mp_p1_surf:    pygame.Surface | None = None
+    _mp_p1_val      = -1
+    _mp_p2_surf:    pygame.Surface | None = None
+    _mp_p2_val      = -1
     _mp_timer_surf: pygame.Surface | None = None
     _mp_timer_secs  = -1
 
@@ -580,34 +577,25 @@ def main() -> int:
                         return 0
                     if event.key == pygame.K_r and game_over:
                         difficulty = run_welcome_screen(screen, bg_surf)
-                        new_mp        = difficulty.multiplayer
-                        new_max_hands = 4 if new_mp else 2
-                        if new_max_hands != max_hands:
-                            tracker.stop()
-                            tracker   = build_tracker(tracker_choice, max_hands=new_max_hands,
-                                                      sensitivity=args.sensitivity,
-                                                      kinect_sensitivity=args.kinect_sensitivity)
-                            tracker.start()
-                            max_hands = new_max_hands
-                        mp = new_mp
+                        mp = difficulty.multiplayer
                         trails = TrailStore()
                         spawner = FruitSpawner(SCREEN_W, SCREEN_H,
                                                spawn_every=difficulty.spawn_every,
                                                bomb_chance=difficulty.bomb_chance)
-                        MAX_LIVES   = difficulty.lives
+                        MAX_LIVES     = difficulty.lives
                         fruits.clear()
                         juice_layer.clear()
-                        score       = 0
-                        lives       = MAX_LIVES
-                        team_scores = [0, 0]
-                        time_left   = difficulty.time_limit
+                        score         = 0
+                        lives         = MAX_LIVES
+                        player_scores = [0, 0]
+                        time_left     = difficulty.time_limit
                         game_over        = False
                         flash_until      = 0.0
                         bomb_flash_until = 0.0
                         explosions.clear()
                         # Invalidate all caches.
                         _score_val = -1;  _lives_key = (-1, -1)
-                        _mp_a_val = _mp_b_val = _mp_timer_secs = -1
+                        _mp_p1_val = _mp_p2_val = _mp_timer_secs = -1
 
             now = time.monotonic()
             dt  = min(now - last_t, 1 / 30.0)
@@ -642,8 +630,8 @@ def main() -> int:
                                 juice_layer.splat(f.x, f.y, "bomb", f.radius)
                                 explosions.append((f.x, f.y, now))
                                 if mp:
-                                    team = trail_id // 2
-                                    team_scores[team] = max(0, team_scores[team] - 5)
+                                    p = trail_id if trail_id < 2 else 0
+                                    player_scores[p] = max(0, player_scores[p] - 5)
                                 else:
                                     lives = max(0, lives - 1)
                                     score = max(0, score - 5)
@@ -654,7 +642,7 @@ def main() -> int:
                             else:
                                 juice_layer.splat(f.x, f.y, f.name, f.radius)
                                 if mp:
-                                    team_scores[trail_id // 2] += 1
+                                    player_scores[trail_id if trail_id < 2 else 0] += 1
                                 else:
                                     score += 1
                                 a, b = split_fruit(f)
@@ -714,10 +702,10 @@ def main() -> int:
                 screen.blit(flash_overlay, (0, 0))
 
             if mp:                              # 7. HUD
-                if team_scores[0] != _mp_a_val:
-                    _mp_a_surf = draw_mp_team_badge(f_small, f_hud, 0, team_scores[0])
-                    _mp_a_val  = team_scores[0]
-                screen.blit(_mp_a_surf, (18, 14))
+                if player_scores[0] != _mp_p1_val:
+                    _mp_p1_surf = draw_mp_player_badge(f_small, f_hud, 0, player_scores[0])
+                    _mp_p1_val  = player_scores[0]
+                screen.blit(_mp_p1_surf, (18, 14))
 
                 timer_secs = int(math.ceil(time_left))
                 if timer_secs != _mp_timer_secs:
@@ -726,10 +714,10 @@ def main() -> int:
                 screen.blit(_mp_timer_surf,
                             (SCREEN_W // 2 - _mp_timer_surf.get_width() // 2, 14))
 
-                if team_scores[1] != _mp_b_val:
-                    _mp_b_surf = draw_mp_team_badge(f_small, f_hud, 1, team_scores[1])
-                    _mp_b_val  = team_scores[1]
-                screen.blit(_mp_b_surf, (SCREEN_W - 18 - _mp_b_surf.get_width(), 14))
+                if player_scores[1] != _mp_p2_val:
+                    _mp_p2_surf = draw_mp_player_badge(f_small, f_hud, 1, player_scores[1])
+                    _mp_p2_val  = player_scores[1]
+                screen.blit(_mp_p2_surf, (SCREEN_W - 18 - _mp_p2_surf.get_width(), 14))
             else:
                 if score != _score_val:
                     _score_surf = draw_score_badge(f_small, f_hud, score)
@@ -746,7 +734,7 @@ def main() -> int:
 
             if game_over:
                 if mp:
-                    draw_mp_game_over(screen, f_big, f_med, f_hud, team_scores)
+                    draw_mp_game_over(screen, f_big, f_med, f_hud, player_scores)
                 else:
                     draw_game_over(screen, f_big, f_med, f_hud, score,
                                    difficulty.label, difficulty.color)

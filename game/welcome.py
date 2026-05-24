@@ -54,9 +54,9 @@ DIFFICULTIES: list[Difficulty] = [
         color=(220, 52, 48), fruit_name="apple",
     ),
     Difficulty(
-        key="2v2",    label="2  vs  2",
-        tagline="Team Battle",
-        desc=["2 teams of 2 players", "90-second timed match"],
+        key="1v1",    label="1  vs  1",
+        tagline="Duel",
+        desc=["1 player per side", "90-second timed match"],
         lives=0, spawn_every=0.75, bomb_chance=0.06, slice_speed=850,
         color=(155, 80, 230), fruit_name="kiwi",
         multiplayer=True, time_limit=90.0,
@@ -345,7 +345,7 @@ def run_welcome_screen(screen: pygame.Surface, bg_surf: pygame.Surface) -> Diffi
             # -- Stats (icon + text, stacked vertically) --
             if diff.multiplayer:
                 stats = [
-                    (_icon_heart, (200, 90, 240),  "Players: 4 (2 per team)"),
+                    (_icon_heart, (200, 90, 240),  "Players: 2 (1 per side)"),
                     (_icon_bolt,  (120, 200, 255), f"Time: {int(diff.time_limit)} seconds"),
                     (_icon_bomb,  (80,  210, 140),  "Most slices wins"),
                 ]
