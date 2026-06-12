@@ -50,6 +50,9 @@ _PREVIEW_WIN = "Kinect Preview"
 _STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
 
 
+_STATE_NAMES = {0: "NotTracked", 1: "Inferred", 2: "Tracked"}
+
+
 class KinectTracker(HandTracker):
     def __init__(self, screen_w: int, screen_h: int, sensitivity: float = 0.5):
         """
@@ -106,8 +109,34 @@ class KinectTracker(HandTracker):
         cv2.imshow(_PREVIEW_WIN, preview)
         cv2.waitKey(1)
 
+    def _check_depth(self) -> None:
+        """Print depth-stream diagnostics: confirms sensor is live and sees objects."""
+        if not self._kinect.has_new_depth_frame():
+            return
+        raw = self._kinect.get_last_depth_frame()
+        if raw is None:
+            return
+        frame = raw.reshape((KINECT_DEPTH_H, KINECT_DEPTH_W)).astype(np.int32)
+        # Valid pixels have depth > 0 (0 = no return / too close).
+        valid = frame[frame > 0]
+        if valid.size == 0:
+            print("[Kinect][depth] all pixels invalid — sensor may be obstructed")
+            return
+        closest_mm  = int(valid.min())
+        median_mm   = int(np.median(valid))
+        print(f"[Kinect][depth] live — closest={closest_mm} mm  median={median_mm} mm  valid_px={valid.size}")
+        if self._prev_depth is not None:
+            changed = int(np.sum(np.abs(frame - self._prev_depth) > 50))
+            print(f"[Kinect][depth] motion pixels (>50 mm change): {changed}")
+        self._prev_depth = frame
+
     def poll(self) -> list[HandSample]:
-        if self._kinect is None or not self._kinect.has_new_body_frame():
+        if self._kinect is None:
+            return []
+
+        self._check_depth()
+
+        if not self._kinect.has_new_body_frame():
             return []
 
         bodies = self._kinect.get_last_body_frame()
@@ -165,6 +194,20 @@ class KinectTracker(HandTracker):
         self._draw_preview(hand_depth_pts)
 
         self._draw_preview(hand_depth_pts)
+
+        # Throttled summary: once per second show frame + body count.
+        self._dbg_frames += 1
+        if tracked_bodies == 0:
+            self._dbg_no_body += 1
+        now = time.monotonic()
+        if now - self._dbg_last_print >= 1.0:
+            print(
+                f"[Kinect] frames={self._dbg_frames}  tracked_bodies={tracked_bodies}"
+                f"  no_body_frames={self._dbg_no_body}  hands_emitted={len(samples)}"
+            )
+            self._dbg_frames  = 0
+            self._dbg_no_body = 0
+            self._dbg_last_print = now
 
         # Throttled summary: once per second show frame + body count.
         self._dbg_frames += 1
